@@ -2,6 +2,7 @@ const { MongoClient, ServerApiVersion } = require("mongodb");
 const express = require("express");
 const cors = require("cors");
 const PORT = process.env.PORT || 3000;
+const Stripe = require("stripe"); 
 const stripe = Stripe(process.env.PAYMENT_SECRET_KEY);
 require("dotenv").config(); // Load environment variables from .env file
 
