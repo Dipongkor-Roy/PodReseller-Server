@@ -70,19 +70,32 @@ async function run() {
       }
       next();
     }
+    //Middleware to verify seller
+    const verifySeller = async (req, res, next) => {
+      try {
+        const email = req.decoded.email;
+        const query = { email: email };
+        const user = await userCollection.findOne(query);
+    
+        if (!user || !user.seller) {
+          return res.status(403).send({ message: 'Forbidden access' });
+        }
+    
+        next();
+      } catch (error) {
+        res.status(500).send({ message: 'Server error' });
+      }
+    };
     
     //seller getting
-    app.get("/users/seller/:email", async (req, res) => {
+    app.get("/users/seller/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
-      if (email !== req.decoded?.email) {
-        return res.status(403).send({ message: "unauthorized access" });
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "Unauthorized access" });
       }
       const query = { email: email };
       const user = await userCollection.findOne(query);
-      let seller = false;
-      if (user) {
-        seller = user?.seller === "true";
-      }
+      const seller = user?.seller || false;
       res.send({ seller });
     });
 
@@ -92,7 +105,7 @@ async function run() {
       res.send(result);
     });
     //find products via seller name
-    app.get("/myProducts", async (req, res) => {
+    app.get("/myProducts",verifyToken,verifySeller, async (req, res) => {
       const sellerName = req.query.sellerName;
       // Assuming the sellerName is provided in the query string
       const query = {
@@ -122,7 +135,7 @@ async function run() {
     });
 
     //add products
-    app.post("/products", async (req, res) => {
+    app.post("/products",verifyToken,verifySeller, async (req, res) => {
       const item = req.body;
       const result = await productsCollection.insertOne(item);
       res.send(result);
@@ -147,7 +160,7 @@ async function run() {
       res.send(result);
     });
     //delete prodcut
-    app.delete("/products/:id", async (req, res) => {
+    app.delete("/products/:id", verifyToken,async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await productsCollection.deleteOne(query);
@@ -192,8 +205,15 @@ async function run() {
       const result = await userCollection.insertOne(user);
       res.send(result);
     });
+    //user delete
+    app.delete("/users/:id",verifyToken, verifyAdmin,async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await userCollection.deleteOne(query);
+      res.send(result);
+    });
     //admin related api
-    app.get("/users/admin/:email", async (req, res) => {
+    app.get("/users/admin/:email",verifyToken, async (req, res) => {
       const email = req.params.email;
       if (email !== req.decoded?.email) {
         return res.status(403).send({ message: "unauthorized access" });
@@ -207,7 +227,7 @@ async function run() {
       res.send({ admin });
     });
     //user to admin
-    app.patch("/users/admin/:id", async (req, res) => {
+    app.patch("/users/admin/:id",verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
       const updateDoc = {
