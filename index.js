@@ -1,9 +1,10 @@
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const express = require("express");
 const cors = require("cors");
 const PORT = process.env.PORT || 3000;
-const Stripe = require("stripe"); 
+const Stripe = require("stripe");
 const stripe = Stripe(process.env.PAYMENT_SECRET_KEY);
+const jwt = require("jsonwebtoken");
 require("dotenv").config(); // Load environment variables from .env file
 
 const app = express();
@@ -33,20 +34,124 @@ async function run() {
     const cartsCollection = client.db("PodResellerDB").collection("carts");
     const userCollection = client.db("PodResellerDB").collection("users");
     const paymentCollection = client.db("PodResellerDB").collection("payments");
+
+    //jwt
+    app.post("/jwt", async (req, res) => {
+      // Generate JWT token based on user credentials
+      const user = req.body;
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn: "1h",
+      });
+      res.send({ token }); // Send token as an object
+    });
+    //verifytoken
+    const verifyToken = (req, res, next) => {
+      // Verify JWT token sent in the Authorization header
+      if (!req.headers.authorization) {
+        return res.status(401).send({ message: "forbidden Access" });
+      }
+      const token = req.headers.authorization.split(" ")[1];
+      jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+        if (err) {
+          return res.status(401).send({ message: "forbidden Access" });
+        }
+        req.decoded = decoded;
+        next(); // Continue to next middleware
+      });
+    };
+        // Middleware to verify admin role
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      const isAdmin = user?.role === 'admin';
+      if (!isAdmin) {
+        return res.status(403).send({ message: 'forbidden access' });
+      }
+      next();
+    }
+    
+    //seller getting
+    app.get("/users/seller/:email", async (req, res) => {
+      const email = req.params.email;
+      if (email !== req.decoded?.email) {
+        return res.status(403).send({ message: "unauthorized access" });
+      }
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      let seller = false;
+      if (user) {
+        seller = user?.seller === "true";
+      }
+      res.send({ seller });
+    });
+
     app.get("/products", async (req, res) => {
       const query = {};
       const result = await productsCollection.find(query).toArray();
       res.send(result);
     });
+    //find products via seller name
+    app.get("/myProducts", async (req, res) => {
+      const sellerName = req.query.sellerName;
+      // Assuming the sellerName is provided in the query string
+      const query = {
+        seller_name: sellerName,
+      }; // Constructing the query to filter by sellerName
+      const result = await productsCollection.find(query).toArray();
+      res.send(result);
+    });
+
     app.get("/products/:category", async (req, res) => {
       const category = req.params.category;
       try {
-        const products = await productsCollection.find({ category });
+        const { products } = await productsCollection.find({ category });
+
         res.json(products);
       } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Server error" });
       }
+    });
+    //find product id wise
+    app.get("/products/:id", async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const prod = await productsCollection.find(filter).toArray();
+      res.send(prod);
+    });
+
+    //add products
+    app.post("/products", async (req, res) => {
+      const item = req.body;
+      const result = await productsCollection.insertOne(item);
+      res.send(result);
+    });
+    //product get via id
+
+    //updateProducts
+    app.patch("/products/:id", async (req, res) => {
+      const item = req.body;
+      const id = req.params.id;
+
+      const filter = { _id: new ObjectId(id) };
+      const updatedDoc = {
+        $set: {
+          name: item.name,
+          resale_price: item.price,
+          description: item.description,
+          image: item.image,
+        },
+      };
+      const result = await productsCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
+    //delete prodcut
+    app.delete("/products/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await productsCollection.deleteOne(query);
+      res.send(result);
     });
     //add to cart api
     app.post("/carts", async (req, res) => {
@@ -87,6 +192,32 @@ async function run() {
       const result = await userCollection.insertOne(user);
       res.send(result);
     });
+    //admin related api
+    app.get("/users/admin/:email", async (req, res) => {
+      const email = req.params.email;
+      if (email !== req.decoded?.email) {
+        return res.status(403).send({ message: "unauthorized access" });
+      }
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      let admin = false;
+      if (user) {
+        admin = user?.role === "admin";
+      }
+      res.send({ admin });
+    });
+    //user to admin
+    app.patch("/users/admin/:id", async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          role: "admin",
+        },
+      };
+      const result = await userCollection.updateOne(filter, updateDoc);
+      res.send(result);
+    });
     //payment
     app.post("/create-payment-intent", async (req, res) => {
       const { price } = req.body;
@@ -116,7 +247,7 @@ async function run() {
       res.send({ paymentResult, deleteResult });
     });
     //get payment under email
-    app.get("/payments/:email", verifyToken, async (req, res) => {
+    app.get("/payments/:email", async (req, res) => {
       const query = { email: req.params.email };
       if (req.params.email !== req.decoded.email) {
         return res.status(403).send({ message: "forbidden access" });
