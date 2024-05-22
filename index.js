@@ -1,6 +1,6 @@
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const express = require("express");
-const cors = require("cors");
+const cors = require('cors');
 const PORT = process.env.PORT || 3000;
 
 const stripe = require("stripe")(process.env.PAYMENT_SECRET_KEY);
@@ -12,7 +12,7 @@ const app = express();
 // Enable CORS
 app.use(cors());
 app.use(express.json());
-// Other middleware and routes...
+// Other middleware and routes..
 // Use the PORT environment variable or default to 3000
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.8zviwwt.mongodb.net/?retryWrites=true&w=majority`;
@@ -126,12 +126,14 @@ async function run() {
       }
     });
     //find product id wise
-    app.get("/products/:id", async (req, res) => {
+    app.get("/products/:id",verifyToken, async (req, res) => {
       const id = req.params.id;
+      console.log(id)
       const filter = { _id: new ObjectId(id) };
       const prod = await productsCollection.find(filter).toArray();
       res.send(prod);
     });
+
 
     //add products
     app.post("/products",verifyToken,verifySeller, async (req, res) => {
@@ -278,9 +280,6 @@ async function run() {
     app.get("/payments/:email", async (req, res) => {
       const query = { email: req.params.email };
       // Assuming you have a method to decode token and attach user email to req.decoded
-      if (req.params.email !== req.decoded?.email) {
-        return res.status(403).send({ message: "Forbidden access" });
-      }
       const result = await paymentCollection.find(query).toArray();
       res.send(result);
     });
