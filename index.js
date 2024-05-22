@@ -2,8 +2,8 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const express = require("express");
 const cors = require("cors");
 const PORT = process.env.PORT || 3000;
-const Stripe = require("stripe");
-const stripe = Stripe(process.env.PAYMENT_SECRET_KEY);
+
+const stripe = require("stripe")(process.env.PAYMENT_SECRET_KEY);
 const jwt = require("jsonwebtoken");
 require("dotenv").config(); // Load environment variables from .env file
 
@@ -46,22 +46,21 @@ async function run() {
     });
     //verifytoken
     const verifyToken = (req, res, next) => {
-      // Verify JWT token sent in the Authorization header
-      if (!req.headers.authorization) {
-        return res.status(401).send({ message: "forbidden Access" });
-      }
-      const token = req.headers.authorization.split(" ")[1];
-      jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
-        if (err) {
-          return res.status(401).send({ message: "forbidden Access" });
-        }
-        req.decoded = decoded;
-        next(); // Continue to next middleware
-      });
-    };
+  if (!req.headers.authorization) {
+    return res.status(401).send({ message: "Forbidden Access" });
+  }
+  const token = req.headers.authorization.split(" ")[1];
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(401).send({ message: "Forbidden Access" });
+    }
+    req.decoded = decoded;
+    next();
+  });
+};
         // Middleware to verify admin role
     const verifyAdmin = async (req, res, next) => {
-      const email = req.decoded.email;
+      const email = req.decoded?.email;
       const query = { email: email };
       const user = await userCollection.findOne(query);
       const isAdmin = user?.role === 'admin';
@@ -72,32 +71,32 @@ async function run() {
     }
     //Middleware to verify seller
     const verifySeller = async (req, res, next) => {
-      try {
-        const email = req.decoded.email;
-        const query = { email: email };
-        const user = await userCollection.findOne(query);
-    
-        if (!user || !user.seller) {
-          return res.status(403).send({ message: 'Forbidden access' });
-        }
-    
-        next();
-      } catch (error) {
-        res.status(500).send({ message: 'Server error' });
-      }
-    };
+  try {
+    const email = req.decoded?.email;
+    const query = { email: email };
+    const user = await userCollection.findOne(query);
+
+    if (!user || !user.seller) {
+      return res.status(403).send({ message: 'Forbidden access' });
+    }
+
+    next();
+  } catch (error) {
+    res.status(500).send({ message: 'Server error' });
+  }
+};
     
     //seller getting
-    app.get("/users/seller/:email", verifyToken, async (req, res) => {
-      const email = req.params.email;
-      if (email !== req.decoded.email) {
-        return res.status(403).send({ message: "Unauthorized access" });
-      }
-      const query = { email: email };
-      const user = await userCollection.findOne(query);
-      const seller = user?.seller || false;
-      res.send({ seller });
-    });
+   app.get("/users/seller/:email", verifyToken, async (req, res) => {
+  const email = req.params.email;
+  if (email !== req.decoded?.email) {
+    return res.status(403).send({ message: "Unauthorized access" });
+  }
+  const query = { email: email };
+  const user = await userCollection.findOne(query);
+  const seller = user?.seller || false;
+  res.send({ seller });
+});
 
     app.get("/products", async (req, res) => {
       const query = {};
@@ -242,35 +241,45 @@ async function run() {
     app.post("/create-payment-intent", async (req, res) => {
       const { price } = req.body;
       const amount = parseInt(price * 100);
-      console.log(amount, "amount inside the intent");
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: amount,
-        currency: "usd",
-        payment_method_types: ["card"],
-      });
-      res.send({
-        clientSecret: paymentIntent.client_secret,
-      });
+    
+      try {
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount,
+          currency: "usd",
+          payment_method_types: ["card"],
+        });
+        res.send({
+          clientSecret: paymentIntent.client_secret,
+        });
+      } catch (error) {
+        console.error("Error creating payment intent:", error);
+        res.status(500).send({ error: "Internal Server Error" });
+      }
     });
-    //post to db
+    
     app.post("/payments", async (req, res) => {
       const payment = req.body;
-      const paymentResult = await paymentCollection.insertOne(payment);
-      console.log("Payment Info", payment);
-      //important part of deletion from cart
-      const query = {
-        _id: {
-          $in: payment.cartIds.map((id) => new ObjectId(id)),
-        },
-      };
-      const deleteResult = await cartsCollection.deleteMany(query);
-      res.send({ paymentResult, deleteResult });
+    
+      try {
+        const paymentResult = await paymentCollection.insertOne(payment);
+        const query = {
+          _id: {
+            $in: payment.cartIds.map(id => new ObjectId(id)),
+          },
+        };
+        const deleteResult = await cartsCollection.deleteMany(query);
+        res.send({ paymentResult, deleteResult });
+      } catch (error) {
+        console.error("Error saving payment:", error);
+        res.status(500).send({ error: "Internal Server Error" });
+      }
     });
-    //get payment under email
+    
     app.get("/payments/:email", async (req, res) => {
       const query = { email: req.params.email };
-      if (req.params.email !== req.decoded.email) {
-        return res.status(403).send({ message: "forbidden access" });
+      // Assuming you have a method to decode token and attach user email to req.decoded
+      if (req.params.email !== req.decoded?.email) {
+        return res.status(403).send({ message: "Forbidden access" });
       }
       const result = await paymentCollection.find(query).toArray();
       res.send(result);
